@@ -1,0 +1,69 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  background-color: #F8F5EE;
+  color: #121212;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: #F8F5EE;
+  background-image: radial-gradient(#121212 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Custom Neo-Brutalist scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #F8F5EE;
+  border-left: 2px solid #000;
+}
+::-webkit-scrollbar-thumb {
+  background: #FFE500;
+  border: 2px solid #000;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #FF5C8D;
+}
+
+/* Tactile button animations */
+.btn-neo {
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-neo:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0px 0px #000;
+}
+.btn-neo:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px 0px #000;
+}
+
+/* Striped pattern for bars */
+.bg-stripes {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.08),
+    rgba(0, 0, 0, 0.08) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+/* Pulse badge ring */
+@keyframes pulse-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.3); opacity: 0.6; }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.5s infinite ease-in-out;
+}

@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: livepoll-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - livepoll-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: livepoll-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - livepoll-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: livepoll-backend
+    restart: always
+    ports:
+      - "8085:8085"
+    environment:
+      - PORT=8085
+      - MONGODB_URI=mongodb://mongodb:27017
+      - DB_NAME=livepoll
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - JWT_SECRET=neo-brutalist-super-secure-production-secret-2026
+      - FRONTEND_URL=http://localhost:5173
+      - APP_ENV=production
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - livepoll-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: livepoll-frontend
+    restart: always
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - livepoll-net
+
+volumes:
+  mongo_data:
+  redis_data:
+
+networks:
+  livepoll-net:
+    driver: bridge
