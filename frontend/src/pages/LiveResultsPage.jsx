@@ -22,7 +22,9 @@ import {
   Download,
   Trophy,
   ExternalLink,
-  ArrowLeft
+  ArrowLeft,
+  Copy,
+  Check
 } from 'lucide-react';
 
 const LiveResultsPage = () => {
@@ -33,9 +35,17 @@ const LiveResultsPage = () => {
   const [wsStatus, setWsStatus] = useState('connecting');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const { user } = useAuth();
   const { toast } = useToast();
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(voteUrl);
+    setCopied(true);
+    toast('Poll link copied to clipboard!', 'success');
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const fetchPoll = async () => {
     try {
@@ -320,9 +330,19 @@ const LiveResultsPage = () => {
                 Scan with any phone camera to cast your vote live!
               </p>
 
-              <div className="w-full p-2 bg-neoBg border-2 border-black text-xs font-mono font-bold truncate select-all">
+              <div className="w-full p-2 bg-neoBg border-2 border-black text-xs font-mono font-bold truncate select-all mb-3 text-center">
                 {voteUrl}
               </div>
+
+              <NeoButton
+                size="md"
+                variant={copied ? 'mint' : 'yellow'}
+                fullWidth
+                onClick={handleCopyLink}
+                icon={copied ? Check : Copy}
+              >
+                {copied ? 'Link Copied!' : 'Copy Poll Link'}
+              </NeoButton>
             </div>
           </NeoCard>
 
