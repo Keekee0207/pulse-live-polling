@@ -25,7 +25,7 @@ type MongoStore struct {
 }
 
 func NewMongoStore(cfg *config.Config) (*MongoStore, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
 
 	clientOptions := options.Client().ApplyURI(cfg.MongoURI)
