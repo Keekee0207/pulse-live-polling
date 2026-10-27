@@ -155,24 +155,7 @@ export const generatePollPdfReport = (exportData) => {
 
   y += 10;
 
-  // 6. Summary Statistics & Audit Box
-  doc.setFillColor(245, 245, 245);
-  doc.setDrawColor(0, 0, 0);
-  doc.setLineWidth(0.6);
-  doc.rect(margin, y, pageWidth - 2 * margin, 28, 'FD');
-
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(0, 0, 0);
-  doc.text('AUDIT & INTEGRITY SUMMARY:', margin + 5, y + 6);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.text(`• Total Vote Transactions Recorded in MongoDB: ${votes.length || total_votes}`, margin + 5, y + 12);
-  doc.text(`• Anti-Spam Duplicate Verification: Active (Redis SHA-256 Fingerprint Set)`, margin + 5, y + 17);
-  doc.text(`• Real-Time Pub/Sub Engine: Redis (Go Gin Cluster)`, margin + 5, y + 22);
-
-  // 7. Footer
+  // 6. Footer
   const now = new Date();
   doc.setFontSize(8);
   doc.setFont('helvetica', 'italic');
