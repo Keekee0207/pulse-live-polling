@@ -1,6 +1,6 @@
 module livepoll-backend
 
-go 1.26.0
+go 1.22
 
 require (
 	github.com/bytedance/gopkg v0.1.4 // indirect
