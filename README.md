@@ -1,219 +1,228 @@
-# ⚡ PULSE • Live Polling Tool
+# PULSE: Real-Time Live Polling System
 
-> **A real-time, zero-refresh live audience polling platform crafted with a bold Neo-Brutalist aesthetic.**
-> Built with **React**, **Go (Gin)**, **Redis**, and **MongoDB**.
-
----
-
-## 🌟 Overview & Flow
-
-```
-+---------------+     +--------------+     +------------------+     +--------------------+
-|  Create Poll  | --> |  Share Link  | --> |  Audience Votes  | --> |    Live Results    |
-| (Host / Auth) |     |  or QR Code  |     |  (Zero friction) |     | (Redis WS updates) |
-+---------------+     +--------------+     +------------------+     +--------------------+
-```
-
-1. **Create Poll**: Authenticated creators configure questions, options, custom Neo-palette colors, multi-choice toggles, and optional auto-close expiration timers.
-2. **Share Link / QR**: Presenters project a high-contrast QR code or copy the shareable link.
-3. **Audience Votes**: Audience members scan with their smartphone or open the link on desktop. No account or login required—vote with a single tap.
-4. **Live Results**: The presenter screen and all spectator devices update **in real-time with zero page refresh**, powered by Go WebSockets and Redis Pub/Sub.
+A distributed live polling platform designed for high-concurrency audience voting and immediate results visualization without page reloads. Built using React, Go (Gin), Redis, and MongoDB.
 
 ---
 
-## 🛠️ Required Tech Stack: Architecture & Roles
+## 1. Project Overview
 
-Every layer of the stack does meaningful work:
+PULSE provides a low-latency polling infrastructure where poll hosts can create questions, share them via direct link or QR code, and observe incoming votes broadcast in real time across all connected client displays.
 
-| Layer | Technology | Primary Responsibilities |
+### Primary Workflow
+1. **Poll Creation**: Authenticated users configure questions, options, voting constraints (single or multiple choice), and optional expiration timers.
+2. **Distribution**: The system generates a unique poll identifier, shareable URL, and vector QR code.
+3. **Audience Participation**: Participants submit votes through any modern web browser without requiring account registration.
+4. **Live Results Streaming**: As votes are recorded, updates are broadcast instantly to all active viewers over persistent WebSocket connections powered by Redis Pub/Sub.
+5. **Analytical Export**: Completed and active polls can be exported on demand into structured PDF analytical reports.
+
+---
+
+## 2. Technology Stack and System Architecture
+
+The application enforces a strict separation of concerns between presentation, routing, in-memory state management, and persistent storage.
+
+```
++-----------------------------------------------------------------------------------+
+|                                  SYSTEM TOPOLOGY                                  |
+|                                                                                   |
+|  [ Audience / Presenter Clients ]                                                 |
+|          │                               ▲                                        |
+|          │ HTTP (Vote / Query)           │ WebSocket Stream (Real-Time Updates)   |
+|          ▼                               │                                        |
+|  [ Go (Gin) API Gateway ] ───────────────┼────────────────────────┐               |
+|          │                               │                        │               |
+|          ├─► In-Memory Hot Path          │                        │               |
+|          │   (Redis Atomic Operations)   │                        │               |
+|          │           │                   │                        │               |
+|          │           ├─► SADD (Deduplication)                     │               |
+|          │           ├─► HINCRBY (Counters)                       │               |
+|          │           └─► PUBLISH (Channel Event)                  │               |
+|          │                      │                                 │               |
+|          │                      ▼                                 │               |
+|          │           [ Redis Pub/Sub Broker ] ────────────────────┘               |
+|          │                                                                        |
+|          └─► Asynchronous Write Path                                              |
+|              (Background Goroutine)                                               |
+|                      │                                                            |
+|                      ▼                                                            |
+|              [ MongoDB Atlas ] (Durable Ledger & Accounts)                        |
++-----------------------------------------------------------------------------------+
+```
+
+### Technology Breakdown
+
+| Component | Technology | Responsibility |
 |---|---|---|
-| **Frontend** | **React + Vite + Tailwind CSS** | Neo-Brutalist UI, instant voting interface, interactive QR codes, real-time WebSocket client, confetti celebrations, and projector mode. |
-| **Backend** | **Go (Gin Framework)** | REST API, input validation, JWT authentication, bcrypt hashing, WebSocket connection upgrade, and graceful lifecycle management. |
-| **Realtime** | **Redis** | **Atomic vote counters** (`HINCRBY`), **O(1) duplicate vote prevention** (`SADD`), **Pub/Sub event broadcasting** (`PUBLISH`/`SUBSCRIBE`), and **active spectator presence tracking** (`INCR`/`DECR`). |
-| **Database** | **MongoDB** | Persistent document storage for user accounts, poll configurations, options, and immutable vote audit logs. |
+| **Frontend** | React, Vite, Tailwind CSS, React Router | Client-side application, dynamic routing, real-time WebSocket state synchronization, and client-side PDF document compilation. |
+| **Backend** | Go (Gin Web Framework) | REST API endpoints, request validation, JWT token issuance and verification, password hashing, and Gorilla WebSocket connection pooling. |
+| **Realtime Engine** | Redis | In-memory atomic counters (`HINCRBY`), O(1) duplicate vote prevention (`SADD`), active spectator presence tracking (`INCR`/`DECR`), and distributed message brokering (`PUBLISH`/`SUBSCRIBE`). |
+| **Persistent Storage**| MongoDB | Schema-enforced document storage for user profiles, poll metadata, options, and permanent historical vote transaction logs. |
 
 ---
 
-## ⚡ How Real-Time Redis Pub/Sub Works
+## 3. Concurrency and Real-Time Engineering
+
+Live polling applications experience extreme traffic surges during voting windows. The system handles high concurrency through the following mechanisms:
+
+### In-Memory Atomic Counting
+Traditional database updates (`UPDATE ... SET votes = votes + 1`) create severe row-locking contention and disk bottlenecks under concurrent load. PULSE routes the critical voting path entirely into Redis RAM using pipeline atomic operations:
+- `HINCRBY poll:{id}:counts {option_id} 1` increments option totals in sub-millisecond time.
+- `INCR poll:{id}:total` tracks overall turnout atomically.
+
+### O(1) Duplicate Vote Prevention
+To prevent multiple votes from the same device without forcing users to authenticate:
+1. The backend constructs a SHA-256 fingerprint combining the client voter token, remote IP address, and User-Agent string.
+2. The fingerprint is inserted into a Redis Set via `SADD poll:{id}:voters {fingerprint}`.
+3. If the value already exists in the set, Redis returns `0`, and the backend immediately rejects the request with an HTTP 409 Conflict status code prior to any database operation.
+
+### Asynchronous Persistence
+To prevent disk write latency from slowing down voter responses:
+- The persistent record insertion into MongoDB is dispatched to a background Go goroutine.
+- The voter receives an immediate HTTP 200 response as soon as the in-memory write succeeds.
+
+### Decoupled Pub/Sub Broadcasting
+Instead of having the voting endpoint iterate over active client connections:
+1. The vote handler publishes a single JSON event to the Redis channel `poll:{id}:events`.
+2. A dedicated subscriber routine in the Go backend receives the message and fans it out across non-blocking WebSocket channels to all listening clients in that poll room.
+3. This architecture enables seamless horizontal scaling: multiple backend instances can serve distinct client groups while remaining perfectly synchronized via the central Redis broker.
+
+---
+
+## 4. Input Validation and Security
+
+All client inputs undergo server-side validation before processing:
+- **Questions**: Must contain between 5 and 255 non-whitespace characters.
+- **Options**: Polls must have between 2 and 8 distinct, non-empty options, each capped at 120 characters. Duplicate options are rejected.
+- **Single vs. Multiple Choice**: The voting handler strictly enforces the poll configuration. If a poll is set to single-choice, payloads with more than one option ID are rejected with HTTP 400 Bad Request.
+- **Poll State**: Closed or expired polls immediately reject incoming votes.
+- **Authentication**: Poll management endpoints require a valid Bearer JWT. Passwords are encrypted using bcrypt with an adaptive cost factor.
+
+---
+
+## 5. Functional Features
+
+- **Dynamic QR Code Generation**: Live results pages render a high-density vector QR code for immediate mobile device scanning.
+- **Direct Link Sharing**: One-click URL copying with visual confirmation.
+- **Live Spectator Tracking**: Concurrent active connections are registered in Redis to provide an accurate audience headcount.
+- **Configurable Expiration**: Polls can be configured to automatically expire after a set time window (5m, 15m, 30m, 1h, 24h).
+- **Creator Controls**: Hosts can manually close, reopen, or delete polls from their dashboard.
+- **PDF Report Generation**: Direct client-side generation of formal summary reports detailing poll metadata, absolute vote counts, percentage shares, winning selections, and completion timestamps.
+
+---
+
+## 6. API Reference
+
+### Authentication Endpoints
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/auth/register` | None | Register a new creator account. |
+| `POST` | `/api/auth/login` | None | Authenticate credentials and receive a JWT token. |
+| `GET` | `/api/auth/me` | Bearer | Retrieve authenticated user profile information. |
+
+### Poll Management Endpoints
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/polls` | Bearer | Create a new poll with options and operational rules. |
+| `GET` | `/api/polls/my` | Bearer | Retrieve all polls created by the authenticated user. |
+| `GET` | `/api/polls/:id` | None | Fetch poll details, options, and current vote counts. |
+| `PATCH` | `/api/polls/:id/status` | Bearer | Toggle a poll between open and closed states. |
+| `DELETE` | `/api/polls/:id` | Bearer | Delete a poll and purge associated vote records. |
+| `GET` | `/api/polls/:id/export` | None | Export raw poll configuration and vote ledger as JSON. |
+
+### Voting and Real-Time Endpoints
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/polls/:id/vote` | None | Submit a vote with option identifiers and voter fingerprint. |
+| `GET` | `/api/ws/polls/:id` | None | Establish persistent WebSocket stream for live results. |
+| `GET` | `/api/health` | None | Health check returning MongoDB and Redis connection status. |
+
+---
+
+## 7. Project Directory Structure
 
 ```
-[Audience Member]
-       │
-       ▼  HTTP POST /api/polls/:id/vote
-[Go Gin Backend]
-       │
-       ├─► Redis SADD poll:{id}:voters {fingerprint} (Atomic anti-duplicate check)
-       ├─► Redis HINCRBY poll:{id}:counts {opt_id} 1 (Atomic counter)
-       ├─► MongoDB Insert (Persistent audit log)
-       │
-       └─► Redis PUBLISH poll:{id}:events {VOTE_UPDATE payload}
-                  │
-                  ▼
-         [Redis Pub/Sub Channel]
-                  │
-                  ├────────────────────────┐
-                  ▼                        ▼
-        [Go Backend Node 1]      [Go Backend Node N]
-                  │                        │
-       [WebSocket Room Hub]     [WebSocket Room Hub]
-                  │                        │
-                  ▼                        ▼
-         [Presenter Projector]     [Audience Screen]
-```
-
-- When any vote is cast, Redis atomically increments the counts and publishes a `VOTE_UPDATE` event.
-- Every Go server instance subscribed to the Redis channel receives the message and pushes it through its WebSocket hub to all connected browser clients.
-- If multiple backend instances are deployed across regions, **every spectator still receives the live update instantaneously**.
-
----
-
-## 🎨 Neo-Brutalist UI/UX Features
-
-- **Hard-Edged Borders**: High-contrast `3px` solid black borders across all cards, buttons, and inputs.
-- **Geometric Drop Shadows**: `4px` to `8px` hard black drop shadows (`shadow-neo`, `shadow-neo-lg`).
-- **Tactile Button Press**: Buttons physically depress on click (`active:translate-x-1 active:translate-y-1 active:shadow-none`).
-- **Vibrant Retro Pop Palette**: Canary Yellow (`#FFE500`), Punch Pink (`#FF5C8D`), Mint Green (`#22E5A1`), Cyan Blue (`#38BDF8`), and Purple (`#C084FC`).
-- **Sticker Badges**: Angled pill tags for statuses (`LIVE NOW`, `MULTI-CHOICE`, `CLOSED`, `EXPIRES SOON`).
-- **Live Progress Bars**: Dynamic striped percentage bars that animate smoothly as votes roll in.
-
----
-
-## 🚀 Key Features
-
-- **Instant Mobile QR Code**: Generates crisp vector QR codes for presentation on projector screens and slides.
-- **Active Spectator Tracking**: Tracks concurrent live viewers via Redis and shows real-time spectator badges.
-- **Duplicate Vote Prevention**: Combines client fingerprinting + IP hashing + Redis `SADD` set verification to prevent double-voting.
-- **Single & Multi-Choice Modes**: Supports single option radio selection or multi-option checkbox voting.
-- **Auto-Close Timers**: Set expiration windows (5m, 15m, 1h, 24h) that automatically close the poll on schedule.
-- **Creator Dashboard**: View engagement metrics, toggle poll open/closed status, delete polls, and export raw data.
-- **Data Export**: 1-click JSON export containing full poll metadata, breakdown, and timestamped vote records.
-- **Projector / Fullscreen Mode**: Clean full-viewport layout optimized for live talks, classrooms, and stream overlays.
-- **Confetti Celebration**: Responsive particle blast when audience members submit a vote.
-
----
-
-## 📂 Project Structure
-
-```
-GUVI INTERN/
+.
 ├── backend/
 │   ├── cmd/
 │   │   └── server/
-│   │       └── main.go              # Server entry point & graceful shutdown
+│   │       └── main.go              # Application entry point, router, and graceful shutdown
 │   ├── internal/
-│   │   ├── config/config.go         # Environment configuration
-│   │   ├── handlers/                # HTTP & WebSocket route controllers
-│   │   │   ├── auth_handler.go
-│   │   │   ├── poll_handler.go
-│   │   │   ├── vote_handler.go
-│   │   │   └── ws_handler.go
-│   │   ├── middleware/              # JWT Auth & CORS middleware
-│   │   ├── models/                  # BSON/JSON struct definitions
-│   │   ├── services/hub.go          # WebSocket room hub + Redis listener
-│   │   ├── storage/                 # MongoDB & Redis client wrappers
-│   │   └── utils/                   # Password hashing, JWT & fingerprinting
-│   ├── Dockerfile
+│   │   ├── config/config.go         # Environment variable configuration loader
+│   │   ├── handlers/                # HTTP route controllers and WebSocket upgrader
+│   │   ├── middleware/              # JWT verification and CORS middleware
+│   │   ├── models/models.go         # Domain structures and BSON/JSON schemas
+│   │   ├── services/hub.go          # WebSocket room manager and Redis subscriber
+│   │   ├── storage/                 # MongoDB repository and Redis client wrappers
+│   │   └── utils/                   # Cryptographic hashing, JWT, and fingerprints
+│   ├── Dockerfile                   # Multi-stage production container build
 │   └── go.mod
 ├── frontend/
 │   ├── src/
-│   │   ├── components/              # NeoButton, NeoCard, NeoBadge, QRCodeModal
-│   │   ├── context/                 # AuthContext & ToastContext
-│   │   ├── pages/                   # Home, Login, Register, Dashboard, Create, Vote, Results
-│   │   ├── services/                # Axios API client & WebSocket manager
-│   │   ├── index.css                # Neo-brutalist styling & custom scrollbars
-│   │   └── App.jsx
-│   ├── Dockerfile
-│   ├── nginx.conf
+│   │   ├── components/              # UI components (buttons, cards, badges, QR modal)
+│   │   ├── context/                 # Authentication and notification state providers
+│   │   ├── pages/                   # Application views (Home, Login, Dashboard, Vote, Live)
+│   │   ├── services/                # Axios HTTP client and WebSocket connection manager
+│   │   └── utils/                   # Client-side PDF generation utility
+│   ├── Dockerfile                   # Containerized frontend build with Nginx
+│   ├── nginx.conf                   # Reverse proxy configuration
 │   └── tailwind.config.js
-├── docker-compose.yml               # Complete 4-service stack composition
+├── docker-compose.yml               # Multi-container orchestration (App, MongoDB, Redis)
 └── README.md
 ```
 
 ---
 
-## 💻 Running Locally
+## 8. Deployment and Live URLs
+
+The application is deployed across managed production environments:
+
+- **Frontend Application**: `https://pulse-live-polling-five.vercel.app`
+- **Backend API Service**: `https://pulse-live-polling-v3nf.onrender.com`
+- **Database**: MongoDB Atlas (Cloud Cluster)
+- **Cache & Pub/Sub Broker**: Upstash Redis (Cloud TLS Instance)
+
+---
+
+## 9. Local Development Setup
 
 ### Prerequisites
-- **Node.js** (v18+)
-- **Go** (v1.22+)
-- **MongoDB** running on `localhost:27017`
-- **Redis** running on `localhost:6379`
+- Go 1.22 or higher
+- Node.js 18 or higher
+- MongoDB instance running on `localhost:27017`
+- Redis instance running on `localhost:6379`
 
-### 1. Start Backend
+### Environment Configuration
+Create a `.env` file in the `backend/` directory:
+```ini
+PORT=8085
+MONGODB_URI=mongodb://localhost:27017
+DB_NAME=livepoll
+REDIS_ADDR=localhost:6379
+REDIS_PASSWORD=
+JWT_SECRET=your_development_secret_key_here
+FRONTEND_URL=http://localhost:5173
+APP_ENV=development
+```
+
+### Running the Backend
 ```bash
 cd backend
 go run ./cmd/server
-# Backend starts on http://localhost:8085
 ```
+The backend initializes on port `8085`. Verify status via `http://localhost:8085/api/health`.
 
-### 2. Start Frontend
+### Running the Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
-# Frontend starts on http://localhost:5173
 ```
+The frontend starts on `http://localhost:5173`.
 
----
-
-## 🐳 Running with Docker Compose (One-Click)
-
-Run the entire stack (MongoDB, Redis, Go Backend, and React Frontend) with a single command:
-
+### Running via Docker Compose
+To spin up all services (MongoDB, Redis, Go Backend, and React Frontend) in isolated containers:
 ```bash
 docker compose up --build
 ```
-
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8085
-- **Redis**: `localhost:6379`
-- **MongoDB**: `localhost:27017`
-
----
-
-## ☁️ Deployment Guide
-
-### Deploying Free on Cloud Services:
-1. **Database**:
-   - **MongoDB**: Provision a free M0 cluster on [MongoDB Atlas](https://www.mongodb.com/atlas) and copy the connection URI.
-   - **Redis**: Provision a free Serverless Redis database on [Upstash](https://upstash.com) and copy the `rediss://...` connection URL.
-2. **Backend**:
-   - Deploy the `/backend` folder to **Render** or **Railway** or **Fly.io** as a Web Service.
-   - Set environment variables:
-     - `MONGODB_URI`: `<Atlas Connection String>`
-     - `REDIS_ADDR`: `<Upstash Connection String>`
-     - `JWT_SECRET`: `<Random 32-character Secret>`
-     - `PORT`: `8085`
-     - `FRONTEND_URL`: `https://your-frontend.vercel.app`
-3. **Frontend**:
-   - Deploy the `/frontend` folder to **Vercel** or **Netlify**.
-   - Set environment variable:
-     - `VITE_API_BASE_URL`: `https://your-backend.onrender.com/api`
-     - `VITE_WS_BASE_URL`: `wss://your-backend.onrender.com/api`
-
----
-
-## 📡 API Reference
-
-| Endpoint | Method | Auth | Description |
-|---|---|---|---|
-| `/api/health` | `GET` | Public | Healthcheck with MongoDB & Redis connectivity status |
-| `/api/auth/register` | `POST` | Public | Register creator account |
-| `/api/auth/login` | `POST` | Public | Sign in & receive JWT token |
-| `/api/auth/me` | `GET` | Bearer | Get current user profile |
-| `/api/polls` | `POST` | Bearer | Create a new poll with options and settings |
-| `/api/polls/my` | `GET` | Bearer | List all polls created by current user |
-| `/api/polls/:id` | `GET` | Public | Fetch poll details & current option vote counts |
-| `/api/polls/:id/vote` | `POST` | Public | Cast vote (enforces duplicate prevention & multi-choice rules) |
-| `/api/polls/:id/status`| `PATCH`| Bearer | Toggle poll open / closed status |
-| `/api/polls/:id/export`| `GET` | Public | Export all votes and counts as JSON |
-| `/api/polls/:id` | `DELETE`| Bearer | Delete poll and associated records |
-| `/api/ws/polls/:id` | `WS` | Public | Real-time WebSocket connection for live counts |
-
----
-
-## 👥 Demo Account Credentials
-
-For quick evaluation, click the **"1-Click Demo Host Login"** button on the sign-in page, or use:
-- **Email**: `host@livepoll.io`
-- **Password**: `polling2026`
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:8085`
