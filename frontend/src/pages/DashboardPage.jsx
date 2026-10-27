@@ -6,6 +6,7 @@ import NeoCard from '../components/NeoCard';
 import NeoButton from '../components/NeoButton';
 import NeoBadge from '../components/NeoBadge';
 import QRCodeModal from '../components/QRCodeModal';
+import { generatePollPdfReport } from '../utils/generatePdfReport';
 import {
   PlusCircle,
   Radio,
@@ -74,15 +75,10 @@ const DashboardPage = () => {
 
   const handleExport = async (pollId, question) => {
     try {
+      toast('Generating PDF Report...', 'info');
       const res = await api.get(`/polls/${pollId}/export`);
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(res.data, null, 2));
-      const downloadAnchor = document.createElement('a');
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `poll_${pollId}_results.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-      toast('Results exported to JSON file!', 'success');
+      generatePollPdfReport(res.data);
+      toast('PDF Report downloaded successfully!', 'success');
     } catch (err) {
       toast('Export failed', 'error');
     }
@@ -294,7 +290,7 @@ const DashboardPage = () => {
                         variant="white"
                         icon={Download}
                         onClick={() => handleExport(poll.id, poll.question)}
-                        title="Export JSON"
+                        title="Download PDF Report"
                       />
 
                       <NeoButton
